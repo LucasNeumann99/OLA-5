@@ -1,0 +1,325 @@
+# Importer CSV filen til R
+library(readr)
+library(ggplot2)
+library(ordinal)
+library(dplyr)
+
+# Opgave 3.1
+
+{
+
+# Angiv filstien til din CSV-fil
+file_path <- "/Users/lucas/Desktop/regnskaber_industri_transport_byg_5_25000_ansatte_anonym.csv"
+
+data <- read.csv2(file_path, fileEncoding = "ISO-8859-1")
+
+colnames(data)
+
+# Kontroller kolonnenavn og saml "Dårlig" og "Dårlige" svarene korrekt
+colnames(data)  # Tjek kolonnenavne for at finde den rigtige kolonne
+
+# Hvis kolonnenavnene er korrekt, skal du sikre, at der er den ønskede kolonne
+data$Lånemuligheder <- as.factor(data$`Hvordan.ser.du.mulighederne.for.at.låne.penge.til.din.virksomhed...fiktivt.spørgsmål.`)
+
+# Saml "Dårlig" og "Dårlige" svarene
+levels(data$Lånemuligheder)[levels(data$Lånemuligheder) == "Dårlig"] <- "Dårlige"
+
+# Beregn fordelingen i procent
+response_counts <- table(data$Lånemuligheder)
+response_percentages <- prop.table(response_counts) * 100
+
+# Omdan til dataframe for lettere plot
+response_df <- as.data.frame(response_percentages)
+
+# Ændre kolonnenavnene i response_df
+colnames(response_df) <- c("Lånemuligheder", "Procent")
+
+
+# Ændre rækkefølgen af faktorerne
+response_df$Lånemuligheder <- factor(response_df$Lånemuligheder,
+                                     levels = c("Meget dårlige", "Dårlige", "Neutrale", "Gode", "Meget gode", "Ved ikke"))
+
+
+# Lav en graf for at illustrere fordelingen af svarene i procent med skiftende farver
+ggplot(response_df, aes(x = Lånemuligheder, y = Procent, fill = Lånemuligheder)) + 
+  geom_bar(stat = "identity", color = "black") +  # Søjler med kant
+  geom_text(aes(label = paste0(round(Procent, 1), "%")), vjust = -0.3, size = 4) +  # Tilføj procentværdier på søjlerne
+  labs(title = "71% af virksomheder finder det nemt at låne penge i 2020",
+       x = "Svar på lånemuligheder", 
+       y = "Procent af virksomheder") +
+  scale_fill_manual(values = c("Meget dårlige" = "#FF6347",    # Rød for meget dårlige
+                               "Dårlige" = "#FF4500",          # Mørk orange for dårlige
+                               "Neutrale" = "#FFD700",         # Gul for neutrale
+                               "Gode" = "#32CD32",             # Grøn for gode
+                               "Meget gode" = "#228B22",       # Mørk grøn for meget gode
+                               "Ved ikke" = "#A9A9A9")) +      # Grå for 'Ved ikke'
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Drej etiketterne for læsbarhed
+}
+
+# Opgave 3.2
+
+{
+# Tjek for NA-værdier i de relevante forklarende variable (inkl. balance og etableringsdato)
+na_counts <- sapply(data[, c("Afkastningsgrad.2020....", 
+                               "Soliditetsgrad.2020....", 
+                               "Bruttofortjeneste.2020..1.000.kr.", 
+                               "Balance.2020..1.000.kr.",
+                               "Antal.ansatte.Cvr.nr.",
+                               "Etableringsdato")], function(x) sum(is.na(x)))
+  
+# Udskriv NA-tælling for de relevante variabler
+print(na_counts)
+  
+# Lav subset for de ønskede variabler
+df_3_2 <- data[, c("Afkastningsgrad.2020....", 
+                     "Soliditetsgrad.2020....", 
+                     "Bruttofortjeneste.2020..1.000.kr.", 
+                     "Balance.2020..1.000.kr.",
+                     "Antal.ansatte.Cvr.nr.",
+                     "Etableringsdato",
+                     "Hvordan.ser.du.mulighederne.for.at.låne.penge.til.din.virksomhed...fiktivt.spørgsmål.")]
+  
+# Omdøb lånemuligheder-kolonnen
+colnames(df_3_2)[colnames(df_3_2) == "Hvordan.ser.du.mulighederne.for.at.låne.penge.til.din.virksomhed...fiktivt.spørgsmål."] <- "Lånemuligheder"
+  
+# Konverter 'Etableringsdato' til Date-format og beregn virksomhedens alder
+df_3_2$Etableringsdato <- as.Date(df_3_2$Etableringsdato, format = "%d-%m-%Y")
+
+# Tjek de første par rækker for at sikre korrekt konvertering
+head(df_3_2$Etableringsdato)
+
+# Beregn virksomhedens alder i år
+dags_dato <- Sys.Date()
+df_3_2$Virksomhedsalder <- as.numeric(difftime(dags_dato, df_3_2$Etableringsdato, units = "days")) %/% 365
+  
+# Fjern rækker med NA-værdier eller "Ved ikke" i Lånemuligheder
+df_3_2_cleaned <- df_3_2[!is.na(df_3_2$Lånemuligheder) & 
+                             df_3_2$Lånemuligheder != "Ved ikke" &
+                             !is.na(df_3_2$Afkastningsgrad.2020....) &
+                             !is.na(df_3_2$Soliditetsgrad.2020....) &
+                             !is.na(df_3_2$Bruttofortjeneste.2020..1.000.kr.) &
+                             !is.na(df_3_2$Balance.2020..1.000.kr.) &
+                             !is.na(df_3_2$Antal.ansatte.Cvr.nr.) &
+                             !is.na(df_3_2$Virksomhedsalder), ]
+  
+# Standardisering af relevante numeriske variabler
+# Ved hjælp af en konstant
+df_3_2_cleaned$Bruttofortjeneste_rescaled <- df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr. / 1000
+
+# Ved hjælp af log1p
+df_3_2_cleaned$Balance_log <- log1p(df_3_2_cleaned$Balance.2020..1.000.kr.)
+
+# Standardiseret til at vise alder
+df_3_2_cleaned$Virksomhedsalder_standardiseret <- scale(df_3_2_cleaned$Virksomhedsalder)
+
+  
+# Definer den ønskede rækkefølge for 'Lånemuligheder'
+df_3_2_cleaned$Lånemuligheder <- factor(df_3_2_cleaned$Lånemuligheder,
+                                          levels = c("Meget dårlige", "Dårlige", "Neutrale", "Gode", "Meget gode"),
+                                          ordered = TRUE)
+  
+# Opret den opdaterede CLM med de nye variabler
+clm_model <- clm(Lånemuligheder ~ Afkastningsgrad.2020.... + 
+                     Soliditetsgrad.2020.... + 
+                     Bruttofortjeneste_rescaled + 
+                     Balance_log + 
+                     Virksomhedsalder_standardiseret +
+                     Antal.ansatte.Cvr.nr., 
+                   data = df_3_2_cleaned)
+  
+# Vis resultatet af den opdaterede model
+summary(clm_model)
+
+}
+
+#Opgave 3.3
+
+#Illustration af AG
+{
+library(dplyr)
+library(ggplot2)
+  
+# Filtrer data for at fjerne "Ved ikke", NA-værdier i Lånemuligheder og Afkastningsgrad
+df_3_2_cleaned <- df_3_2_cleaned %>%
+  filter(!is.na(Lånemuligheder) & Lånemuligheder != "Ved ikke") %>%
+  filter(!is.na(Afkastningsgrad.2020....))  # Fjern rækker med NA i Afkastningsgrad
+
+# Opdel Afkastningsgrad i 3 tredjedele (1/3, 2/3, 3/3)
+# Vi skal beregne de relevante grænser for de 3 tredjedele
+grænse_1_3 <- quantile(df_3_2_cleaned$Afkastningsgrad.2020...., 1/3, na.rm = TRUE)
+grænse_2_3 <- quantile(df_3_2_cleaned$Afkastningsgrad.2020...., 2/3, na.rm = TRUE)
+
+df_3_2_cleaned$AG_tredjedele <- case_when(
+  df_3_2_cleaned$Afkastningsgrad.2020.... <= grænse_1_3 ~ "Første tredjedel",
+  df_3_2_cleaned$Afkastningsgrad.2020.... > grænse_1_3 & df_3_2_cleaned$Afkastningsgrad.2020.... <= grænse_2_3 ~ "Anden tredjedele",
+  df_3_2_cleaned$Afkastningsgrad.2020.... > grænse_2_3 ~ "Sidste tredjedel",
+  TRUE ~ NA_character_
+)
+
+# Sørg for at Lånemuligheder er i den rigtige rækkefølge
+df_3_2_cleaned$Lånemuligheder <- factor(df_3_2_cleaned$Lånemuligheder, 
+                                        levels = c("Dårlige", "Neutrale", "Gode"),
+                                        ordered = TRUE)
+
+# Sørg for, at AG_tredjedele er i den ønskede rækkefølge
+df_3_2_cleaned$AG_tredjedele <- factor(df_3_2_cleaned$AG_tredjedele, 
+                                       levels = c("Første tredjedel", "Anden tredjedele", "Sidste tredjedel"))
+
+# Plot for de 3 tredjedele af Afkastningsgrad og Lånemuligheder
+ggplot(df_3_2_cleaned, aes(x = AG_tredjedele, fill = Lånemuligheder )) +
+  geom_bar(position = "dodge", color = "black") +  # Barplot med farver for Lånemuligheder
+  scale_fill_manual(values = c("Dårlige" = "#4A90E2",  # Rød for 'Dårlige'
+                               "Neutrale" = "#7D7F7D", # Gul for 'Neutrale'
+                               "Gode" = "#32CD32")) +  # Grøn for 'Gode'
+  labs(title = "Negativ sammenhæng; Høj AG hæmmer synes på lånemuligheder",
+       x = "Virksomheder i første tredjedel har lavest AG",
+       y = "Antal Virksomheder") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Drej etiketterne for bedre læsbarhed
+}
+
+#Illustration af SG
+{
+# Filtrer data for at fjerne "Ved ikke", NA-værdier i Lånemuligheder og Soliditetsgrad
+df_3_2_cleaned <- df_3_2_cleaned %>%
+  filter(!is.na(Lånemuligheder) & Lånemuligheder != "Ved ikke") %>%
+  filter(!is.na(Soliditetsgrad.2020....))  # Fjern rækker med NA i Soliditetsgrad
+
+# Opdel Soliditetsgrad i 3 tredjedele (1/3, 2/3, 3/3)
+# Vi skal beregne de relevante grænser for de 3 tredjedele
+grænse_1_3_SG <- quantile(df_3_2_cleaned$Soliditetsgrad.2020...., 1/3, na.rm = TRUE)
+grænse_2_3_SG <- quantile(df_3_2_cleaned$Soliditetsgrad.2020...., 2/3, na.rm = TRUE)
+
+df_3_2_cleaned$SG_tredjedele <- case_when(
+  df_3_2_cleaned$Soliditetsgrad.2020.... <= grænse_1_3_SG ~ "Første tredjedel",
+  df_3_2_cleaned$Soliditetsgrad.2020.... > grænse_1_3_SG & df_3_2_cleaned$Soliditetsgrad.2020.... <= grænse_2_3_SG ~ "Anden tredjedel",
+  df_3_2_cleaned$Soliditetsgrad.2020.... > grænse_2_3_SG ~ "Sidste tredjedel",
+  TRUE ~ NA_character_
+)
+
+# Sørg for, at SG_tredjedele er i den ønskede rækkefølge
+df_3_2_cleaned$SG_tredjedele <- factor(df_3_2_cleaned$SG_tredjedele, 
+                                       levels = c("Første tredjedel", "Anden tredjedel", "Sidste tredjedel"))
+
+# Sørg for at Lånemuligheder er i den rigtige rækkefølge
+df_3_2_cleaned$Lånemuligheder <- factor(df_3_2_cleaned$Lånemuligheder_3grupper, 
+                                        levels = c("Dårlige", "Neutrale", "Gode"),
+                                        ordered = TRUE)
+
+# Plot for de 3 tredjedele af Soliditetsgrad og Lånemuligheder
+ggplot(df_3_2_cleaned, aes(x = SG_tredjedele, fill = Lånemuligheder)) +
+  geom_bar(position = "dodge", color = "black") +  # Barplot med farver for Lånemuligheder
+  scale_fill_manual(values = c("Dårlige" = "#4A90E2",  # Rød for 'Dårlige'
+                               "Neutrale" = "#7D7F7D", # Gul for 'Neutrale'
+                               "Gode" = "#32CD32")) +  # Grøn for 'Gode'
+  labs(title = "Høj kapitalstyrke øger troen på gode lånemuligheder",
+       x = "Virksomheder i første tredjedel har lavest SG",
+       y = "Antal Virksomheder") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Drej etiketterne for bedre læsbarhed
+}
+
+#Illustration af bruttofortjeneste
+{
+# Beregn kvantilerne for Bruttofortjeneste for at opdele den i 3 tredjedele
+grænse_1_3 <- quantile(df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr., 1/3, na.rm = TRUE)
+grænse_2_3 <- quantile(df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr., 2/3, na.rm = TRUE)
+
+# Opret kategorierne baseret på de beregnede kvantiler
+df_3_2_cleaned$Bruttofortjeneste_tredjedele <- case_when(
+  df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr. <= grænse_1_3 ~ "Første tredjedel",
+  df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr. > grænse_1_3 & df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr. <= grænse_2_3 ~ "Anden tredjedel",
+  df_3_2_cleaned$Bruttofortjeneste.2020..1.000.kr. > grænse_2_3 ~ "Sidste tredjedel",
+  TRUE ~ NA_character_
+)
+
+# Sørg for at kategorierne er i den ønskede rækkefølge
+df_3_2_cleaned$Bruttofortjeneste_tredjedele <- factor(df_3_2_cleaned$Bruttofortjeneste_tredjedele, 
+                                                      levels = c("Første tredjedel", "Anden tredjedel", "Sidste tredjedel"))
+
+# Plot for de 3 tredjedele af Bruttofortjeneste og Lånemuligheder
+ggplot(df_3_2_cleaned, aes(x = Bruttofortjeneste_tredjedele, fill = Lånemuligheder)) +
+  geom_bar(position = "dodge", color = "black") +  # Barplot med farver for Lånemuligheder
+  scale_fill_manual(values = c("Dårlige" = "#4A90E2",  # Blå for 'Dårlige'
+                               "Neutrale" = "#7D7F7D",  # Grå for 'Neutrale'
+                               "Gode" = "#32CD32")) +  # Grøn for 'Gode'
+  labs(title = "Høj bruttofortjeneste styrker virksomheders fokus på lånemuligheder",
+       x = "Virksomheder i første tredjedel har lavest Bruttofortjeneste",
+       y = "Antal Virksomheder") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Drej etiketterne for bedre læsbarhed
+}
+
+#Illustration af balancen
+{
+# Filtrer data for at fjerne "Ved ikke" og NA-værdier i Lånemuligheder og Balance
+df_3_2_cleaned <- df_3_2_cleaned %>%
+  filter(!is.na(Lånemuligheder) & Lånemuligheder != "Ved ikke") %>%
+  filter(!is.na(Balance.2020..1.000.kr.))  # Fjern rækker med NA i Balance
+
+# Opdel Balance i 3 tredjedele (1/3, 2/3, 3/3)
+grænse_1_3_balance <- quantile(df_3_2_cleaned$Balance.2020..1.000.kr., 1/3, na.rm = TRUE)
+grænse_2_3_balance <- quantile(df_3_2_cleaned$Balance.2020..1.000.kr., 2/3, na.rm = TRUE)
+
+# Opret kategorierne for Balance baseret på de beregnede kvantiler
+df_3_2_cleaned$Balance_tredjedele <- case_when(
+  df_3_2_cleaned$Balance.2020..1.000.kr. <= grænse_1_3_balance ~ "Første tredjedel",
+  df_3_2_cleaned$Balance.2020..1.000.kr. > grænse_1_3_balance & df_3_2_cleaned$Balance.2020..1.000.kr. <= grænse_2_3_balance ~ "Anden tredjedel",
+  df_3_2_cleaned$Balance.2020..1.000.kr. > grænse_2_3_balance ~ "Sidste tredjedel",
+  TRUE ~ NA_character_
+)
+
+# Sørg for, at kategorierne er i den ønskede rækkefølge
+df_3_2_cleaned$Balance_tredjedele <- factor(df_3_2_cleaned$Balance_tredjedele, 
+                                            levels = c("Første tredjedel", "Anden tredjedel", "Sidste tredjedel"))
+
+# Plot for de 3 tredjedele af Balance og Lånemuligheder
+ggplot(df_3_2_cleaned, aes(x = Balance_tredjedele, fill = Lånemuligheder)) +
+  geom_bar(position = "dodge", color = "black") +  # Barplot med farver for Lånemuligheder
+  scale_fill_manual(values = c("Dårlige" = "#4A90E2",  # Blå for 'Dårlige'
+                               "Neutrale" = "#7D7F7D", # Grå for 'Neutrale'
+                               "Gode" = "#32CD32")) +  # Grøn for 'Gode'
+  labs(title = "Størrelsen på balancen har stor betydning for lånemulighederne",
+       x = "Virksomheder i første tredjedel har lavest Balance",
+       y = "Antal virksomheder") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Drej etiketterne for bedre læsbarhed
+}
+
+
+#Illustration af antal ansatte
+{
+# Filtrer data for at fjerne "Ved ikke" og NA-værdier i Lånemuligheder og Antal ansatte
+df_3_2_cleaned <- df_3_2_cleaned %>%
+  filter(!is.na(Lånemuligheder) & Lånemuligheder != "Ved ikke") %>%
+  filter(!is.na(Antal.ansatte.Cvr.nr.))  # Fjern rækker med NA i Antal ansatte
+
+# Opdel Antal ansatte i 3 tredjedele (1/3, 2/3, 3/3)
+grænse_1_3_ansatte <- quantile(df_3_2_cleaned$Antal.ansatte.Cvr.nr., 1/3, na.rm = TRUE)
+grænse_2_3_ansatte <- quantile(df_3_2_cleaned$Antal.ansatte.Cvr.nr., 2/3, na.rm = TRUE)
+
+# Opret kategorierne for Antal ansatte baseret på de beregnede kvantiler
+df_3_2_cleaned$Ansatte_tredjedele <- case_when(
+  df_3_2_cleaned$Antal.ansatte.Cvr.nr. <= grænse_1_3_ansatte ~ "Første tredjedel",
+  df_3_2_cleaned$Antal.ansatte.Cvr.nr. > grænse_1_3_ansatte & df_3_2_cleaned$Antal.ansatte.Cvr.nr. <= grænse_2_3_ansatte ~ "Anden tredjedel",
+  df_3_2_cleaned$Antal.ansatte.Cvr.nr. > grænse_2_3_ansatte ~ "Sidste tredjedel",
+  TRUE ~ NA_character_
+)
+
+# Sørg for, at kategorierne er i den ønskede rækkefølge
+df_3_2_cleaned$Ansatte_tredjedele <- factor(df_3_2_cleaned$Ansatte_tredjedele, 
+                                            levels = c("Første tredjedel", "Anden tredjedel", "Sidste tredjedel"))
+
+# Plot for de 3 tredjedele af Antal ansatte og Lånemuligheder
+ggplot(df_3_2_cleaned, aes(x = Ansatte_tredjedele, fill = Lånemuligheder)) +
+  geom_bar(position = "dodge", color = "black") +  # Barplot med farver for Lånemuligheder
+  scale_fill_manual(values = c("Dårlige" = "#4A90E2",  # Blå for 'Dårlige'
+                               "Neutrale" = "#7D7F7D", # Grå for 'Neutrale'
+                               "Gode" = "#32CD32")) +  # Grøn for 'Gode'
+  labs(title = "Antal ansatte og virksomheders vurdering af lånemuligheder",
+       x = "Virksomheder i første tredjedel har færrest antal ansatte",
+       y = "Antal virksomheder") +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Drej etiketterne for bedre læsbarhed
+}
